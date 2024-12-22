@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azure OpenAI Realtime API Example</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            padding: 0;
+            margin: 0;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            flex-direction: column;
+        }
+
+        .container {
+            display: flex;
+            width: 100%;
+            height: calc(100% - 60px);
+        }
+
+        .header {
+            text-align: center;
+            padding: 20px;
+            background: #fff;
+            border-bottom: 1px solid #ccc;
+            width: 100%;
+        }
+
+        .messages-container {
+            background: #fff;
+            padding: 20px;
+            border-right: 1px solid #ccc;
+            flex: 1;  /* 改为flex:1实现自适应占据剩余空间 */
+            overflow-y: auto;
+        }
+
+        .messages-container #messages {
+            text-align: left;
+            max-height: calc(100vh - 160px);
+            overflow-y: auto;
+            margin-top: 20px;
+            border-top: 1px solid #ccc;
+            padding-top: 10px;
+        }
+
+        .messages-container #messages p {
+            margin: 5px 0;
+        }
+
+        .controls-container {
+            background: #fff;
+            padding: 20px;
+            width: 360px; /* 改为固定宽度360px */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+        }
+
+        .controls-container input[type="text"] {
+            width: calc(100% - 22px);
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        .controls-container button {
+            padding: 10px 20px;
+            margin: 10px 5px;
+            border: none;
+            border-radius: 4px;
+            background-color: #2196f3;
+            color: white;
+            cursor: pointer;
+        }
+
+        .controls-container button:disabled {
+            background-color: #ccc;
+        }
+
+        .controls-container .status {
+            font-size: 15px;
+            color: #2196f3;
+            margin: 10px 0;
+        }
+
+        .controls-container .wav-line {
+            width: 180px;
+            height: 60px;
+            margin: 10px auto;
+        }
+
+        .controls-container .wav-time {
+            font-size: 15px;
+            color: #2196f3;
+            font-family: fantasy;
+        }
+
+        #settings-container {
+            margin-bottom: 20px;
+            padding: 10px;
+            border-bottom: 1px solid #ccc;
+        }
+
+        #settings-container input[type="text"] {
+            width: calc(100% - 22px);
+            padding: 10px;
+            margin: 5px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>Azure OpenAI Realtime API Example</h1>
+    </div>
+    <div class="container">
+        <div class="messages-container">
+            <div id="messages"></div>
+        </div>
+        <div class="controls-container">
+            <div id="settings-container">
+                <input type="text" id="resource-endpoint" placeholder="Resource Endpoint" value="YOUR_ENDPOINT.openai.azure.com">
+                <input type="text" id="api-version" placeholder="API Version" value="2024-10-01-preview">
+                <input type="text" id="deployment" placeholder="Deployment" value="gpt-4o-realtime-preview">
+                <input type="text" id="api-key" placeholder="API Key">
+                <button id="startButton">Start Connection</button>
+            </div>
+            <p class="status"><b id="status"></b></p>
+            <div class="wav-line"></div>
+            <p class="wav-time">00:00</p>
+            <button id="startRecButton" disabled>Start Recording</button>
+            <button id="stopRecButton" disabled>Send Recording</button>
+            <button id="cancelRecButton" disabled>Cancel Recording</button>
+            <input type="text" id="messageInput" placeholder="Type a message">
+            <button id="sendMessageButton" disabled>Send Message</button>
+        </div>
+    </div>
+
+    <script src="static/lib/recorder-core.js"></script>
+    <script src="static/lib/pcm.js"></script>
+    <script src="static/lib/waveview.js"></script>
+    <script src="static/tool.js"></script>
+
+    <script>
+        const startButton = document.getElementById('startButton');
+        const sendMessageButton = document.getElementById('sendMessageButton');
+        const messagesDiv = document.getElementById('messages');
+        let socket;
+
+        // Recorder
+        const startRecButton = document.getElementById('startRecButton');
+        const stopRecButton = document.getElementById('stopRecButton');
+        const cancelRecButton = document.getElementById('cancelRecButton');
+        const statusHTML = document.getElementById('status');
+        let recorder = Recorder({
+            type: 'pcm',
+            sampleRate: 16000,
+            bitRate: 16,
+            onProcess: function (buffers, powerLevel, bufferDuration, bufferSampleRate, newBufferIdx, asyncEnd) {
+                waveView.input(buffers[buffers.length - 1], powerLevel, bufferSampleRate);
+                document.querySelector('.wav-time').innerText = tool.msdate(bufferDuration);
+            }
+        });
+        let waveView = Recorder.WaveView({
+            elem: ".wav-line",
+            width: 180,
+            height: 60,
+        });
+
+        // 先打开录音权限
+        recorder.open();
+
+        startRecButton.addEventListener('click', () => {
+            statusHTML.innerText = 'Recording';
+            recorder.start();
+            startRecButton.disabled = true;
+            stopRecButton.disabled = false;
+        });
+        cancelRecButton.addEventListener('click', () => {
+            statusHTML.innerText = 'Canceled';
+            recorder.close();
+            startRecButton.disabled = false;
+            stopRecButton.disabled = true;
+        });
+        stopRecButton.addEventListener('click', () => {
+            statusHTML.innerText = 'Processing';
+            recorder.stop(function (blob, duration) {
+                recorder.close();
+                startRecButton.disabled = false;
+                stopRecButton.disabled = true;
+                // 处理pcm数据
+                var reader = new FileReader();
+                reader.onload = function (e) {
+                    var pcmData = e.target.result;
+
+                    // 将ArrayBuffer转换为Base64字符串
+                    const base64Audio = tool.arrayBufferToBase64(pcmData);
+
+                    // 将Base64字符串分割成块
+                    const chunkSize = 6488; // 设定块的大小
+                    const base64Chunks = tool.splitBase64String(base64Audio, chunkSize);
+
+                    // 发送 base64Chunks
+                    base64Chunks.forEach((chunk, index) => {
+                        const message = {
+                            type: "input_audio_buffer.append",
+                            audio: chunk
+                        };
+                        if (socket) {
+                            socket.send(JSON.stringify(message));
+                        }
+                    });
+                };
+                reader.readAsArrayBuffer(blob);
+            }, function (msg) {
+                console.log('stop error', msg);
+                recorder.close();
+                startRecButton.disabled = false;
+                stopRecButton.disabled = true;
+            });
+        });
+
+        startButton.addEventListener('click', () => {
+            const resourceEndpoint = document.getElementById('resource-endpoint').value;
+            const apiVersion = document.getElementById('api-version').value;
+            const deployment = document.getElementById('deployment').value;
+            const apiKey = document.getElementById('api-key').value;
+
+            // 验证所有必填字段
+            if(!resourceEndpoint || !apiVersion || !deployment || !apiKey) {
+                alert('Please fill in all required fields');
+                return;
+            }
+
+            const wsUrl = `wss://${resourceEndpoint}/openai/realtime?api-version=${apiVersion}&deployment=${deployment}&api-key=${apiKey}`;
+
+            // 隐藏设置容器
+            document.getElementById('settings-container').style.display = 'none';
+
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = () => {
+                messagesDiv.innerHTML += '<p>Connection opened</p>';
+                sendMessageButton.disabled = false;
+                startRecButton.disabled = false;
+                // 更新设置
+                let setting = {
+                    "type": "session.update",
+                    "session": {
+                        "instructions": "",
+                        "voice": "alloy",
+                        "input_audio_transcription": { "model": "whisper-1" },
+                        "turn_detection": { "type": "server_vad" },
+                        "tools": [],
+                        "temperature": 0.9,
+                        "modalities": ["text", "audio"]
+                    }
+                };
+                socket.send(JSON.stringify(setting));
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                messagesDiv.innerHTML += `<p>Received: ${JSON.stringify(data)}</p>`;
+            };
+
+            socket.onerror = (error) => {
+                messagesDiv.innerHTML += `<p>Error: ${error.message}</p>`;
+            };
+
+            socket.onclose = () => {
+                messagesDiv.innerHTML += '<p>Connection closed</p>';
+                sendMessageButton.disabled = true;
+            };
+        });
+
+        sendMessageButton.addEventListener('click', () => {
+            const messageInput = document.getElementById('messageInput').value;
+            const message = {
+                type: "conversation.item.create",
+                previous_item_id: "",
+                item: {
+                    type: "message",
+                    role: "user",
+                    content: [
+                        {
+                            type: "input_text",
+                            text: messageInput
+                        }
+                    ]
+                }
+            };
+            socket.send(JSON.stringify(message));
+            messagesDiv.innerHTML += `<p>Sent: ${JSON.stringify(message)}</p>`;
+        });
+    </script>
+</body>
+
+</html>
