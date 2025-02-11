@@ -39,21 +39,29 @@
             background: #fff;
             padding: 20px;
             border-right: 1px solid #ccc;
-            flex: 1;  /* 改为flex:1实现自适应占据剩余空间 */
+            flex: 1;
             overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .parsed-messages {
+            flex: 1;
+            overflow-y: auto;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 10px;
+        }
+
+        .parsed-messages p {
+            margin: 5px 0;
         }
 
         .messages-container #messages {
-            text-align: left;
-            max-height: calc(100vh - 160px);
+            height: 300px;
             overflow-y: auto;
             margin-top: 20px;
             border-top: 1px solid #ccc;
             padding-top: 10px;
-        }
-
-        .messages-container #messages p {
-            margin: 5px 0;
         }
 
         .controls-container {
@@ -128,6 +136,9 @@
     </div>
     <div class="container">
         <div class="messages-container">
+            <div class="parsed-messages" id="parsedMessages">
+                <p id="last"></p>
+            </div>
             <div id="messages"></div>
         </div>
         <div class="controls-container">
@@ -144,20 +155,46 @@
             <button id="startRecButton" disabled>Start Recording</button>
             <button id="stopRecButton" disabled>Send Recording</button>
             <button id="cancelRecButton" disabled>Cancel Recording</button>
-            <input type="text" id="messageInput" placeholder="Type a message">
-            <button id="sendMessageButton" disabled>Send Message</button>
+            <!--input type="text" id="messageInput" placeholder="Type a message">
+            <button id="sendMessageButton" disabled>Send Message</button>-->
         </div>
     </div>
 
     <script src="static/lib/recorder-core.js"></script>
     <script src="static/lib/pcm.js"></script>
     <script src="static/lib/waveview.js"></script>
+    <script src="static/lib/buffer_stream.player.js"></script>
     <script src="static/tool.js"></script>
 
     <script>
         const startButton = document.getElementById('startButton');
         const sendMessageButton = document.getElementById('sendMessageButton');
         const messagesDiv = document.getElementById('messages');
+        const parsedMessagesDiv = document.getElementById('parsedMessages');
+        const audioBuffers = {};
+        audioBuffers['temp'] = [];
+        const addMessage = (role, text, id="") => {
+            if(id && text === ""){
+                // 创建占位消息后续填充
+                const message = document.createElement('p');
+                message.id = id;
+                message.innerHTML = `<b>${role}:</b><audio id="au_${id}"></audio> ${text}`;
+                parsedMessagesDiv.insertBefore(message, document.getElementById('last'));
+                audioBuffers[id] = [];
+                return;
+            }
+            if (id) {
+                // 更新占位消息
+                const message = document.getElementById(id);
+                message.innerHTML = message.innerHTML + text;
+            }else{
+                // 无id为用户输入消息
+                const message = document.createElement('p');
+                message.innerHTML = `<b>${role}:</b> ${text}`;
+                parsedMessagesDiv.insertBefore(message, document.getElementById('last'));
+            }
+        };
+
         let socket;
 
         // Recorder
@@ -180,14 +217,13 @@
             height: 60,
         });
 
-        // 先打开录音权限
-        recorder.open();
-
         startRecButton.addEventListener('click', () => {
-            statusHTML.innerText = 'Recording';
-            recorder.start();
-            startRecButton.disabled = true;
-            stopRecButton.disabled = false;
+            recorder.open(function(){
+                statusHTML.innerText = 'Recording';
+                recorder.start();
+                startRecButton.disabled = true;
+                stopRecButton.disabled = false;
+            });
         });
         cancelRecButton.addEventListener('click', () => {
             statusHTML.innerText = 'Canceled';
@@ -209,20 +245,37 @@
                     // 将ArrayBuffer转换为Base64字符串
                     const base64Audio = tool.arrayBufferToBase64(pcmData);
 
+                    // 临时存入audioBuffers
+                    audioBuffers['temp'] = [base64Audio];
+
                     // 将Base64字符串分割成块
                     const chunkSize = 6488; // 设定块的大小
                     const base64Chunks = tool.splitBase64String(base64Audio, chunkSize);
 
                     // 发送 base64Chunks
-                    base64Chunks.forEach((chunk, index) => {
-                        const message = {
-                            type: "input_audio_buffer.append",
-                            audio: chunk
-                        };
-                        if (socket) {
-                            socket.send(JSON.stringify(message));
+                    (async () => {
+                        for (let index = 0; index < base64Chunks.length; index++) {
+                            const chunk = base64Chunks[index];
+                            const message = {
+                                type: "input_audio_buffer.append",
+                                audio: chunk
+                            };
+                            if (socket) {
+                                socket.send(JSON.stringify(message));
+                                // 第一段发送后，暂停 500ms
+                                //if (index === 0) {
+                                //    await new Promise(resolve => setTimeout(resolve, 500));
+                                //}
+                            }
                         }
-                    });
+                        // 提交音频，要求服务端相应，不用加入空白音频的等待来触发服务端的回应
+                        //const message = {
+                        //    type: "input_audio_buffer.commit"
+                        //};
+                        //if (socket) {
+                        //    socket.send(JSON.stringify(message));
+                        //}
+                    })();
                 };
                 reader.readAsArrayBuffer(blob);
             }, function (msg) {
@@ -254,8 +307,10 @@
 
             socket.onopen = () => {
                 messagesDiv.innerHTML += '<p>Connection opened</p>';
-                sendMessageButton.disabled = false;
+                //sendMessageButton.disabled = false;
                 startRecButton.disabled = false;
+                initAudioStream(); // 初始化音频流播放器
+                
                 // 更新设置
                 let setting = {
                     "type": "session.update",
@@ -274,7 +329,34 @@
 
             socket.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                messagesDiv.innerHTML += `<p>Received: ${JSON.stringify(data)}</p>`;
+                if (data.type) {
+                    switch (data.type) {
+                        case "conversation.item.input_audio_transcription.completed":
+                            addMessage('User', data.transcript, data.item_id);
+                            break;
+                        case "response.content_part.added":
+                            addMessage('AI', "", data.response_id);
+                            break;
+                        case "response.audio_transcript.delta":
+                            addMessage('AI', data.delta, data.response_id);
+                            break;
+                        case "input_audio_buffer.speech_stopped":
+                            // 录制音频发送完毕
+                            audioBuffers[data.item_id] = audioBuffers['temp'];
+                            addMessage('User', '', data.item_id);
+                            showAudioBuffer(data.item_id);
+                            break;
+                        case "response.audio.delta":
+                        case "response.audio.done":
+                            handleAudioData(data);
+                            break;
+                        default:
+                            messagesDiv.innerHTML += `<p>Received: ${JSON.stringify(data)}</p>`;
+                            break;
+                    }
+                }else{
+                    messagesDiv.innerHTML += `<p>Received: ${JSON.stringify(data)}</p>`;
+                }
             };
 
             socket.onerror = (error) => {
@@ -287,25 +369,71 @@
             };
         });
 
-        sendMessageButton.addEventListener('click', () => {
-            const messageInput = document.getElementById('messageInput').value;
-            const message = {
-                type: "conversation.item.create",
-                previous_item_id: "",
-                item: {
-                    type: "message",
-                    role: "user",
-                    content: [
-                        {
-                            type: "input_text",
-                            text: messageInput
-                        }
-                    ]
+        // 添加音频流播放器
+        let audioStream;
+        const initAudioStream = () => {
+            if(audioStream) {
+                audioStream.stop();
+            }
+
+            audioStream = Recorder.BufferStreamPlayer({
+                decode: false, // PCM数据不需要解码
+                realtime:false, // 非实时处理，音频数据返回会比播放快
+                onInputError: function(errMsg, inputIndex) {
+                    console.error("音频片段输入错误: " + errMsg);
+                },
+                onUpdateTime: function() {
+                    // 可以在这里更新播放时间显示
+                },
+                onPlayEnd: function() {
+                    if(!audioStream.isStop) {
+                        console.log('音频播放完成或等待新数据');
+                    }
+                },
+                transform: function(arrayBuffer, sampleRate, True, False) {
+                    // PCM数据转换
+                    const pcmData = new Int16Array(arrayBuffer);
+                    True(pcmData, 22050); // 使用22050Hz采样率
                 }
-            };
-            socket.send(JSON.stringify(message));
-            messagesDiv.innerHTML += `<p>Sent: ${JSON.stringify(message)}</p>`;
-        });
+            });
+
+            audioStream.start(function() {
+                console.log("音频流已打开，开始播放");
+            }, function(err) {
+                console.error("音频流启动失败：" + err);
+            });
+        };
+
+        // 修改音频数据处理
+        const handleAudioData = (data) => {
+            if(data.type === "response.audio.delta") {
+                audioBuffers[data.response_id].push(data.delta);
+                const pcmData = tool.base64ToArrayBuffer(data.delta);
+                if(audioStream && !audioStream.isStop) {
+                    audioStream.input(pcmData);
+                }
+            } else if(data.type === "response.audio.done") {
+                showAudioBuffer(data.response_id);
+                // 音频结束处理
+                if(audioStream) {
+                    // 可以选择是否停止流
+                    // audioStream.stop();
+                }
+            }
+        };
+
+        const showAudioBuffer = (id) => {
+            const audioBuffer = audioBuffers[id];
+            if (audioBuffer.length === 0) return;
+            // 组合base64数据片段
+            const base64Audio = audioBuffer.join('');
+            const audio = document.getElementById(`au_${id}`);
+            audio.src = tool.getPcm2WavBase64(base64Audio);
+            audio.controls = true;
+            delete audioBuffers[id];
+        };
+
+        
     </script>
 </body>
 
