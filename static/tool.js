@@ -108,9 +108,9 @@ tool.addWavHeader = function (samples, sampleRateTmp, sampleBits, channelCount) 
     return view.buffer
 }
 
-tool.getPcm2WavBase64 = function(base64) {
+tool.getPcm2WavBase64 = function(base64, sampleRate=16000) {
     let bytes = tool.base64ToArrayBuffer(base64)
-    let buffer = tool.addWavHeader(bytes, 22050, 16, 1)
+    let buffer = tool.addWavHeader(bytes, sampleRate, 16, 1)
     return `data:audio/wav;base64,${btoa(new Uint8Array(buffer).reduce((data, byte) => {
         return data + String.fromCharCode(byte)
       }, ''))}`

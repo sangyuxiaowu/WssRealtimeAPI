@@ -172,7 +172,6 @@
         const messagesDiv = document.getElementById('messages');
         const parsedMessagesDiv = document.getElementById('parsedMessages');
         const audioBuffers = {};
-        audioBuffers['temp'] = [];
         const addMessage = (role, text, id="") => {
             if(id && text === ""){
                 // 创建占位消息后续填充
@@ -202,6 +201,7 @@
         const stopRecButton = document.getElementById('stopRecButton');
         const cancelRecButton = document.getElementById('cancelRecButton');
         const statusHTML = document.getElementById('status');
+        let recData = "";
         let recorder = Recorder({
             type: 'pcm',
             sampleRate: 16000,
@@ -245,8 +245,8 @@
                     // 将ArrayBuffer转换为Base64字符串
                     const base64Audio = tool.arrayBufferToBase64(pcmData);
 
-                    // 临时存入audioBuffers
-                    audioBuffers['temp'] = [base64Audio];
+                    // 临时存入
+                    recData = base64Audio;
 
                     // 将Base64字符串分割成块
                     const chunkSize = 6488; // 设定块的大小
@@ -342,7 +342,6 @@
                             break;
                         case "input_audio_buffer.speech_stopped":
                             // 录制音频发送完毕
-                            audioBuffers[data.item_id] = audioBuffers['temp'];
                             addMessage('User', '', data.item_id);
                             showAudioBuffer(data.item_id);
                             break;
@@ -423,12 +422,13 @@
         };
 
         const showAudioBuffer = (id) => {
-            const audioBuffer = audioBuffers[id];
+            const sampleRate = id.startsWith("item") ? 16000 : 22050;
+            const audioBuffer = id.startsWith("item") ? [recData] :  audioBuffers[id];
             if (audioBuffer.length === 0) return;
             // 组合base64数据片段
             const base64Audio = audioBuffer.join('');
             const audio = document.getElementById(`au_${id}`);
-            audio.src = tool.getPcm2WavBase64(base64Audio);
+            audio.src = tool.getPcm2WavBase64(base64Audio, sampleRate);
             audio.controls = true;
             delete audioBuffers[id];
         };
