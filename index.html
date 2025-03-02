@@ -262,19 +262,26 @@
                             };
                             if (socket) {
                                 socket.send(JSON.stringify(message));
-                                // 第一段发送后，暂停 500ms
-                                //if (index === 0) {
-                                //    await new Promise(resolve => setTimeout(resolve, 500));
-                                //}
+                                // 每段暂停 200ms
+                                await new Promise(resolve => setTimeout(resolve, 200));
                             }
                         }
-                        // 提交音频，要求服务端相应，不用加入空白音频的等待来触发服务端的回应
-                        //const message = {
-                        //    type: "input_audio_buffer.commit"
-                        //};
-                        //if (socket) {
-                        //    socket.send(JSON.stringify(message));
-                        //}
+                        // 提交音频缓冲区，通知服务端音频输入已完成，默认是 server_vad 需要一定时长的静音
+                        const message = {
+                            type: "input_audio_buffer.commit"
+                        };
+                        // 显式触发响应生成
+                        const message2 = {
+                            type: "response.create",
+                            response: {
+                                temperature: 0.9,
+                                modalities: ["text", "audio"]
+                            }
+                        };
+                        if (socket) {
+                            socket.send(JSON.stringify(message));
+                            socket.send(JSON.stringify(message2));
+                        }
                     })();
                 };
                 reader.readAsArrayBuffer(blob);
