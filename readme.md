@@ -2,6 +2,10 @@
 
 Javascript example of using the Azure OpenAI Realtime API.
 
+# How to use
+
+Download the repository and open the `index.html` file in your browser.
+
 # Related content
 
 - [How to use the Realtime API](https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/realtime-audio?wt.mc_id=DT-MVP-5005195)
