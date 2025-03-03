@@ -5,7 +5,7 @@ var path = require('path');
 var fs = require("fs");
 var querystring = require('querystring');
 
-var isHTTPS = true;
+var isHTTPS = fs.existsSync('./ssl/ip.cer') && fs.existsSync('./ssl/ip.key');
 var port = isHTTPS ? '443' : '9080';
 var sslfile = {
     cert: "./ssl/ip.cer",
