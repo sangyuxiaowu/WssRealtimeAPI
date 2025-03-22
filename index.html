@@ -82,7 +82,7 @@
         let recData = "";
         let recorder = Recorder({
             type: 'pcm',
-            sampleRate: 16000,
+            sampleRate: 24000,
             bitRate: 16,
             onProcess: function (buffers, powerLevel, bufferDuration, bufferSampleRate, newBufferIdx, asyncEnd) {
                 waveView.input(buffers[buffers.length - 1], powerLevel, bufferSampleRate);
@@ -277,7 +277,7 @@
                 transform: function(arrayBuffer, sampleRate, True, False) {
                     // PCM数据转换
                     const pcmData = new Int16Array(arrayBuffer);
-                    True(pcmData, 22050); // 使用22050Hz采样率
+                    True(pcmData, 24000); // 24KHz 采样率
                 }
             });
 
@@ -307,7 +307,7 @@
         };
 
         const showAudioBuffer = (id) => {
-            const sampleRate = id.startsWith("item") ? 16000 : 22050;
+            const sampleRate = 24000;//id.startsWith("item") ? 16000 : 22050;
             const audioBuffer = id.startsWith("item") ? [recData] :  audioBuffers[id];
             if (audioBuffer.length === 0) return;
             // 组合base64数据片段
